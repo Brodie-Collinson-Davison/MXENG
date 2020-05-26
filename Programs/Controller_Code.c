@@ -3,13 +3,24 @@
 //global variables
 static char serial_string[200] = {0};
 static char lcd_string [50] = {0};
+static const uint16_t NO_MSG_RECEIVED_SHUTDOWN_TIME_MS = 500;
+static const uint16_t LED_NOTIFICATION_FLASH_TIME_MS = 5;
+
+//LED coms pins
+#define COMS_LED_SUCCESS_PIN PA1;
+#define COMS_LED_FAILED_PIN PA0;
+#define AUTONOMY_ENABLED_LED_PIN PA2;
 
 bool autonomyEnabled = false;
 bool msgRecievedSuccessful = false;
 uint8_t fsmComState = 0;
 uint8_t recvDataBytes [4] = {0};
 
+uint32_t lastReceiveMSGLedFlashTime = 0;
+uint32_t lastFailedReceiveMSGLedFlashTime = 0;
+
 int map (int a, int b, int c, int d);
+void setNotificationLEDS(uint32_t currentTime, uint32_t lastSuccessLEDTime, uint32_t lastFailedLEDTime, bool autonomyEnabled);
 
 int main(void)
 {
@@ -40,6 +51,8 @@ int main(void)
 	
 	//joystick inputs
 	DDRF &= ~(1<<PF0) | ~(1<<PF1) | ~(1<<PF2);
+	//Sets the led output pins
+	DDRA |= (1<<COMS_LED_SUCCESS_PIN) | (1<<COMS_LED_FAILED_PIN) | (1<<AUTONOMY_ENABLED_LED_PIN);
 	
 	while(1)
 	{
@@ -80,6 +93,10 @@ int main(void)
 		//RECIEVE MSG
 		if (msgRecievedSuccessful)
 		{
+			autonomyModeEnabled = recvDataBytes [0] == 1;
+			lastMSGReceiveTime = currentTime; 
+			lastReceiveMSGLedFlashTime = currentTime; 
+
 			//read distance values
 			for (int i = 0; i < 3; i ++)
 			{
@@ -99,7 +116,9 @@ int main(void)
 			
 			msgRecievedSuccessful = false;
 		}
-		
+
+		//LED comms
+		setNotificationLEDS(currentTime, lastReceiveMSGLedFlashTime, lastFailedReceiveMSGLedFlashTime, autonomyModeEnabled)	
 	}
 	
 	return(1);
@@ -109,6 +128,37 @@ int main(void)
 int map(int a, int b, int c, int d)
 {
 	return (((double)a/(double)b) * (d-c)) + c;
+}
+
+//LED Notification function
+void setNotificationLEDS(uint32_t currentTime, uint32_t lastSuccessLEDTime, uint32_t lastFailedLEDTime, bool autonomyEnabled)
+{
+	if(currentTime > lastSuccessLEDTime + LED_NOTIFICATION_FLASH_TIME_MS)
+	{
+		PORTA &= ~(1<<COMS_LED_SUCCESS_PIN);
+	}
+	else
+	{
+		PORTA |= (1<<COMS_LED_SUCCESS_PIN);
+	}
+
+	if(currentTime > lastFailedLEDTime + LED_NOTIFICATION_FLASH_TIME_MS)
+	{
+		PORTA &= ~(1<<COMS_LED_FAILED_PIN);
+	}
+	else
+	{
+		PORTA |= (1<<COMS_LED_FAILED_PIN);
+	}
+
+	if(autonomyEnabled)
+	{
+		PORTA &= ~(1<<AUTONOMY_ENABLED_LED_PIN)
+	}
+	else
+	{
+		PORTA |= (1<<AUTONOMY_ENABLED_LED_PIN);
+	}
 }
 
 //receive message interrupt
