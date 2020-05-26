@@ -2,15 +2,19 @@
 
 //global variables
 static char serial_string[200] = {0};
+static char lcd_string [50] = {0};
 
 bool autonomyEnabled = false;
 bool msgRecievedSuccessful = false;
 uint8_t fsmComState = 0;
 uint8_t recvDataBytes [4] = {0};
 
+int map (int a, int b, int c, int d);
+
 int main(void)
 {
 	uint32_t lastMsgSendTime = 0;
+	uint32_t currentTime = 0;
 	
 	uint16_t distSensors [3];
 	uint16_t joystick1 [2];
@@ -39,6 +43,9 @@ int main(void)
 	
 	while(1)
 	{
+		//get current time
+		currentTime = milliseconds;
+		
 		//Read joystick values
 		joystick1 [1] = adc_read (PF0);
 		joystick1 [0] = adc_read (PF1);
@@ -49,32 +56,25 @@ int main(void)
 		//////////////////////////////////////////////////////////////////////////
 		
 		//SEND MSG
-		if (milliseconds - lastMsgSendTime >= 1000)
+		if (currentTime - lastMsgSendTime >= 100)
 		{
 			//prep data within a range of 0 - 253
 			uint8_t databytes [4] = {0};
-			databytes [0] = map (joystick2, 1023, 0, 253);
+			databytes [0] = autonomyEnabled;
 			databytes [1] = map (joystick1 [0], 1023, 0, 253);
 			databytes [2] = map (joystick1 [1], 1023, 0, 253);
 			databytes [3] = map (joystick2, 1023, 0, 253);
 			
-			for (int i = 0; i < 4; i ++)
-			{
-				sprintf(serial_string, "%d [%3d]\n", i, databytes[i]);
-				serial0_print_string(serial_string);
-			}
+			lastMsgSendTime = currentTime;
 			
 			serial2_write_byte (0xFF);	//Send start byte
 			
-			//write databytes to serial2
 			for (int i = 0; i < 4; i ++)
 			{
 				serial2_write_byte (databytes [i]);
 			}
 			
 			serial2_write_byte (0xFE);	//Send stop byte
-			
-			lastMsgSendTime = milliseconds;
 		}
 		
 		//RECIEVE MSG
@@ -85,6 +85,17 @@ int main(void)
 			{
 				distSensors [i] = map (recvDataBytes [i], 253, 0, 1023);
 			}
+			
+			sprintf (serial_string, "1: %3d 2: %3d 3: %3d\r", distSensors [0], distSensors [1], distSensors [2]);
+			serial0_print_string(serial_string);
+			
+			lcd_goto (0x00);
+			sprintf (lcd_string, "1: %3d || 2: %3d", distSensors [0], distSensors [1]);
+			lcd_puts (lcd_string);
+			
+			lcd_goto (0x40);
+			sprintf (lcd_string, "3: %3d", distSensors [2]);
+			lcd_puts (lcd_string);
 			
 			msgRecievedSuccessful = false;
 		}
@@ -108,31 +119,31 @@ ISR (USART2_RX_vect)
 	switch (fsmComState)
 	{
 		case 0:
-			//IDLE LOOP WAITING FOR MSG START BYTE
+		//IDLE LOOP WAITING FOR MSG START BYTE
 		break;
 		
 		case 1:
-			recvDataBytes [0] = inDataByte;
-			fsmComState ++;
+		recvDataBytes [0] = inDataByte;
+		fsmComState ++;
 		break;
 		
 		case 2:
-			recvDataBytes [1] = inDataByte;
-			fsmComState ++;
+		recvDataBytes [1] = inDataByte;
+		fsmComState ++;
 		break;
 		
 		case 3:
-			recvDataBytes [2] = inDataByte;
-			fsmComState ++;
+		recvDataBytes [2] = inDataByte;
+		fsmComState ++;
 		break;
 		
 		case 4:
-			if (inDataByte == 0xFE)
-			{
-				msgRecievedSuccessful = true;
-			}
+		if (inDataByte == 0xFE)
+		{
+			msgRecievedSuccessful = true;
+		}
 		
-			fsmComState = 0;
+		fsmComState = 0;
 		break;
 	}
 	
