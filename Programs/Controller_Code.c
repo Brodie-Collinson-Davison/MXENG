@@ -11,6 +11,13 @@ static const uint16_t LED_NOTIFICATION_FLASH_TIME_MS = 5;
 #define COMS_LED_FAILED_PIN PA2
 #define AUTONOMY_ENABLED_LED_PIN PA1
 
+//PWM pins
+#define M1_PWM_PIN_1 PB5
+#define M1_PWM_PIN_2 PB6
+#define M2_PWM_PIN_1 PE3
+#define M2_PWM_PIN_2 PE4
+#define SERVO_PWM_PIN PH3
+
 bool autonomyEnabled = false;
 bool msgRecievedSuccessful = false;
 uint8_t fsmComState = 0;
@@ -54,7 +61,30 @@ int main(void)
 	DDRF &= ~(1<<PF0) | ~(1<<PF1) | ~(1<<PF2);
 	//Sets the led output pins
 	DDRA |= (1<<COMS_LED_SUCCESS_PIN) | (1<<COMS_LED_FAILED_PIN) | (1<<AUTONOMY_ENABLED_LED_PIN);
+
+	///MOTOR CONTROLS///
 	
+	////// TIMER 1 //////
+	DDRB |= (1<<M1_PWM_PIN_1)|(1<<M1_PWM_PIN_2); //sets OC1A and OC1B as OUTPUTS
+	TCCR1A |= (1<<COM1A1)|(1<<COM1B1);	//Set on down, clear on up (OC1A & OC1B)
+	TCCR1B |= (1<<CS10);	//sets PRESCALER to 1
+	TCCR1B |= (1<<WGM13);	//Select PWM Mode (Phase & frequency Correct)
+	ICR1 = 800;	//Sets top to 800
+
+	////// TIMER 3 //////
+	DDRE |= (1<<M2_PWM_PIN_1)|(1<<M2_PWM_PIN_2); //sets OC3A and OC3B as OUTPUTS
+	TCCR3A |= (1<<COM3A1)|(1<<COM3B1);	//Set on down, clear on up (OC3A & OC3B)
+	TCCR3B |= (1<<CS10);	//Sets PRESCALER to 1
+	TCCR3B |= (1<<WGM13);	//Select PWM Mode (Phase and frequency correct) Mode 8
+	ICR3 = 800;		//Set top to 800
+
+	////// TIMER 4 //////
+	DDRH |= (1<<SERVO_PWM_PIN); //sets OC4A as OUTPUT
+	TCCR4A |= (1<<COM4A1); //sets on down, clears on up
+	TCCR4B |= (1<<CS11); //sets PRESCALER to 8
+	TCCR4B |= (1<<WGM13); //PWM MODE 8 (Phase and frequency correct)
+	ICR4 = 20000; //sets top to 20000
+
 	while(1)
 	{
 		//Read joystick values
