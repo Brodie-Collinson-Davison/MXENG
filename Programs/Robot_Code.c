@@ -128,6 +128,15 @@ int main(void)
 			//		OPERATIONS
 			//////////////////////////////////////////////////////////////////////////
 			
+			//Check if has recieved a message recently
+			if (currentTime - lastMSGReceiveTime >= NO_MSG_RECEIVED_SHUTDOWN_TIME_MS)
+			{
+				operating = false;
+				} else {
+				
+				operating = true;
+				}
+			
 			if (operating)
 			{
 				//get joystick values between -1 and 1
@@ -148,14 +157,7 @@ int main(void)
 			}
 		}
 		
-		//Check if has recieved a message recently
-		if (currentTime - lastMSGReceiveTime >= NO_MSG_RECEIVED_SHUTDOWN_TIME_MS)
-		{
-			operating = false;
-			} else {
-			
-			operating = true;
-		}
+	
 		
 		//Send Message
 		if (currentTime - lastMSGSendTime >= 100)
