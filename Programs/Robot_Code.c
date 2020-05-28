@@ -14,6 +14,11 @@ static const uint16_t LED_NOTIFICATION_FLASH_TIME_MS = 5;
 #define COMS_LED_FAILED_PIN PA0
 #define AUTONOMY_MODE_ENABLE_LED_PIN PA2
 
+//Sensor pins
+#define LONG_RANGE_SENSOR PF0
+#define SHORT_RANGE_SENSOR_LEFT PF1
+#define SHORT_RANGE_SENSOR__RIGHT PF2
+
 //pwm pins
 #define M1_PWM_PIN_1 PB5
 #define M1_PWM_PIN_2 PB6
@@ -67,7 +72,7 @@ int main(void)
 	_delay_ms(20);
 	
 	//Set distance sensor input pins
-	DDRF &= ~(1<<PF0)|~(1<<PF1)|~(1<<PF2);
+	DDRF &= ~(1<<LONG_RANGE_SENSOR)|~(1<<SHORT_RANGE_SENSOR_LEFT)|~(1<<SHORT_RANGE_SENSOR__RIGHT);
 	
 	//Set coms led output pins
 	DDRA |= (1<<COMS_LED_SUCCESS_PIN) | (1<<COMS_LED_FAILED_PIN) | (1<<AUTONOMY_MODE_ENABLE_LED_PIN);

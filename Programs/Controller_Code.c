@@ -11,6 +11,12 @@ static const uint16_t LED_NOTIFICATION_FLASH_TIME_MS = 5;
 #define COMS_LED_FAILED_PIN PA2
 #define AUTONOMY_ENABLED_LED_PIN PA1
 
+//Joystick and autonomy pins
+#define JOYSTICK_1_X PF0
+#define JOYSTICK_1_Y PF1
+#define JOYSTICK_2_X PF2
+#define AUTONOMY_ENABLED_PIN PD0
+
 bool autonomyEnabled = false;
 bool msgRecievedSuccessful = false;
 uint8_t fsmComState = 0;
@@ -42,8 +48,8 @@ int main(void)
 	
 	
 	//button interrupts
-	DDRD &= ~(1<<PD0);		// INT0  is also PD0 and we set the DDR to input
-	PORTD |= (1<<PD0);		// enable pullupresistor on PD0
+	DDRD &= ~(1<<AUTONOMY_ENABLED_PIN);		// INT0  is also PD0 and we set the DDR to input
+	PORTD |= (1<<AUTONOMY_ENABLED_PIN);		// enable pullupresistor on PD0
 	EICRA &= ~(1<<ISC00);	// INT0 to trigger on a FALLING edge
 	EIMSK |= (1<<INT0);		// enable INT0 & INT1
 	sei();					// globally enable interrupts
@@ -51,7 +57,7 @@ int main(void)
 	UCSR2B |= (1 << RXCIE2); // Enable the USART Receive Complete interrupt (USART_RXC)
 	
 	//joystick inputs
-	DDRF &= ~(1<<PF0) | ~(1<<PF1) | ~(1<<PF2);
+	DDRF &= ~(1<<JOYSTICK_1_X) | ~(1<<JOYSTICK_1_Y) | ~(1<<JOYSTICK_2_X);
 	//Sets the led output pins
 	DDRA |= (1<<COMS_LED_SUCCESS_PIN) | (1<<COMS_LED_FAILED_PIN) | (1<<AUTONOMY_ENABLED_LED_PIN);
 	
