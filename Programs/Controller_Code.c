@@ -7,9 +7,9 @@ static const uint16_t NO_MSG_RECEIVED_SHUTDOWN_TIME_MS = 500;
 static const uint16_t LED_NOTIFICATION_FLASH_TIME_MS = 5;
 
 //LED coms pins
-#define COMS_LED_SUCCESS_PIN PA1;
-#define COMS_LED_FAILED_PIN PA0;
-#define AUTONOMY_ENABLED_LED_PIN PA2;
+#define COMS_LED_SUCCESS_PIN PA0
+#define COMS_LED_FAILED_PIN PA2
+#define AUTONOMY_ENABLED_LED_PIN PA1
 
 //PWM pins
 #define M1_PWM_PIN_1 PB5
@@ -23,7 +23,6 @@ bool msgRecievedSuccessful = false;
 uint8_t fsmComState = 0;
 uint8_t recvDataBytes [4] = {0};
 
-uint32_t lastReceiveMSGLedFlashTime = 0;
 uint32_t lastFailedReceiveMSGLedFlashTime = 0;
 
 int map (int a, int b, int c, int d);
@@ -31,6 +30,8 @@ void setNotificationLEDS(uint32_t currentTime, uint32_t lastSuccessLEDTime, uint
 
 int main(void)
 {
+	uint32_t lastReceiveMSGLedFlashTime = 0;
+	
 	uint32_t lastMsgSendTime = 0;
 	uint32_t currentTime = 0;
 	
@@ -86,9 +87,6 @@ int main(void)
 
 	while(1)
 	{
-		//get current time
-		currentTime = milliseconds;
-		
 		//Read joystick values
 		joystick1 [1] = adc_read (PF0);
 		joystick1 [0] = adc_read (PF1);
@@ -97,6 +95,9 @@ int main(void)
 		//////////////////////////////////////////////////////////////////////////
 		//		COMS
 		//////////////////////////////////////////////////////////////////////////
+		
+		//get current time
+		currentTime = milliseconds;
 		
 		//SEND MSG
 		if (currentTime - lastMsgSendTime >= 100)
@@ -123,9 +124,7 @@ int main(void)
 		//RECIEVE MSG
 		if (msgRecievedSuccessful)
 		{
-			autonomyModeEnabled = recvDataBytes [0] == 1;
-			lastMSGReceiveTime = currentTime; 
-			lastReceiveMSGLedFlashTime = currentTime; 
+			lastReceiveMSGLedFlashTime = currentTime;
 
 			//read distance values
 			for (int i = 0; i < 3; i ++)
@@ -148,7 +147,7 @@ int main(void)
 		}
 
 		//LED comms
-		setNotificationLEDS(currentTime, lastReceiveMSGLedFlashTime, lastFailedReceiveMSGLedFlashTime, autonomyModeEnabled)	
+		setNotificationLEDS(currentTime, lastReceiveMSGLedFlashTime, lastFailedReceiveMSGLedFlashTime, autonomyEnabled);
 	}
 	
 	return(1);
@@ -163,7 +162,7 @@ int map(int a, int b, int c, int d)
 //LED Notification function
 void setNotificationLEDS(uint32_t currentTime, uint32_t lastSuccessLEDTime, uint32_t lastFailedLEDTime, bool autonomyEnabled)
 {
-	if(currentTime > lastSuccessLEDTime + LED_NOTIFICATION_FLASH_TIME_MS)
+	if(currentTime >= lastSuccessLEDTime + LED_NOTIFICATION_FLASH_TIME_MS)
 	{
 		PORTA &= ~(1<<COMS_LED_SUCCESS_PIN);
 	}
@@ -172,7 +171,7 @@ void setNotificationLEDS(uint32_t currentTime, uint32_t lastSuccessLEDTime, uint
 		PORTA |= (1<<COMS_LED_SUCCESS_PIN);
 	}
 
-	if(currentTime > lastFailedLEDTime + LED_NOTIFICATION_FLASH_TIME_MS)
+	if(currentTime >= lastFailedLEDTime + LED_NOTIFICATION_FLASH_TIME_MS)
 	{
 		PORTA &= ~(1<<COMS_LED_FAILED_PIN);
 	}
@@ -181,9 +180,9 @@ void setNotificationLEDS(uint32_t currentTime, uint32_t lastSuccessLEDTime, uint
 		PORTA |= (1<<COMS_LED_FAILED_PIN);
 	}
 
-	if(autonomyEnabled)
+	if(!autonomyEnabled)
 	{
-		PORTA &= ~(1<<AUTONOMY_ENABLED_LED_PIN)
+		PORTA &= ~(1<<AUTONOMY_ENABLED_LED_PIN);
 	}
 	else
 	{
@@ -221,6 +220,9 @@ ISR (USART2_RX_vect)
 		if (inDataByte == 0xFE)
 		{
 			msgRecievedSuccessful = true;
+			} else {
+			
+			lastFailedReceiveMSGLedFlashTime = milliseconds;
 		}
 		
 		fsmComState = 0;
