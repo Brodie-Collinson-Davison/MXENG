@@ -1,3 +1,6 @@
+/*
+AUTHORS: Brodie Collinson Davison, Sadman Sakib
+*/
 #include "Controller.h"
 #include <math.h>
 
@@ -5,28 +8,36 @@
 //			GLOBAL VARS
 //////////////////////////////////////////////////////////////////////////
 
+static char serial_string[200] = {0};
+
+//Distance measurement buffer size declaration
 static const uint16_t DISTANCE_MEASUREMENT_BUFFER_SIZE = 200;
+
+//COMS settings
+static const uint16_t LED_NOTIFICATION_FLASH_TIME_MS = 10;
 static const uint16_t NO_MSG_RECEIVED_SHUTDOWN_TIME_MS = 500;
-static const uint16_t LED_NOTIFICATION_FLASH_TIME_MS = 5;
+static const uint16_t MSG_SEND_DELAY_MS = 100;
 
-//coms
+//TIMER PWM SETTINGS
+static const uint16_t MOTOR_TIMER_COMPARE_REGISTER_TOP = 1300;
+static const uint16_t SERVO_TIMER_COMPARE_REGISTER_TOP = 20000;
+
+static const uint16_t SERVO_PWM_MIN_SIGNAL = 1750;
+static const uint16_t SERVO_PWM_MAX_SIGNAL = 2000;
+static const uint16_t SERVO_PWM_STOP_SIGNAL = 1870;
+
+//COMS led pins
 #define COMS_LED_SUCCESS_PIN PA1
-#define COMS_LED_FAILED_PIN PA0
-#define AUTONOMY_MODE_ENABLE_LED_PIN PA2
+#define COMS_LED_FAILED_PIN PA2
+#define AUTONOMY_MODE_ENABLE_LED_PIN PA0
 
-//Sensor pins
-#define LONG_RANGE_SENSOR PF0
-#define SHORT_RANGE_SENSOR_LEFT PF1
-#define SHORT_RANGE_SENSOR__RIGHT PF2
-
-//pwm pins
+//Motor PWM pins
 #define M1_PWM_PIN_1 PB5
 #define M1_PWM_PIN_2 PB6
 #define M2_PWM_PIN_1 PE3
 #define M2_PWM_PIN_2 PE4
 #define SERVO_PWM_PIN PH3
 
-static char serial_string[200] = {0};
 
 uint8_t recvDataBytes [4] = {0};
 uint8_t fsmComState = 0;
@@ -35,18 +46,17 @@ bool msgRecieveSuccessful = false;
 uint32_t lastReceiveMSGLedFlashTime = 0;
 uint32_t lastFailedReceiveMSGLedFlashTime = 0;
 
-//function declarations
+///			FUNCTION DECLARATIONS			///
 
 float mapf (float a, float b, float c, float d);
 int mapi (int a, int b, int c, int d);
 void setMotorSpeed (float joyPos[]);
 void setNotificationLEDS (uint32_t currentTime, uint32_t lastSuccessLEDTime, uint32_t lastFailLEDTime, bool autonomyEnabled);
+void initialiseTimers ();
 
 int main(void)
 {
-	//////////////////////////////////////////////////////////////////////////
-	//			Declarations
-	//////////////////////////////////////////////////////////////////////////
+	///		DECLARATIONS		///
 	
 	bool operating = false;
 	bool autonomyModeEnabled = false;
@@ -72,38 +82,16 @@ int main(void)
 	_delay_ms(20);
 	
 	//Set distance sensor input pins
-	DDRF &= ~(1<<LONG_RANGE_SENSOR)|~(1<<SHORT_RANGE_SENSOR_LEFT)|~(1<<SHORT_RANGE_SENSOR__RIGHT);
-	
+	DDRF &= ~(1<<PF0)|~(1<<PF1)|~(1<<PF2);
 	//Set coms led output pins
 	DDRA |= (1<<COMS_LED_SUCCESS_PIN) | (1<<COMS_LED_FAILED_PIN) | (1<<AUTONOMY_MODE_ENABLE_LED_PIN);
 	
-	//		TIMER 1		//
-	
-	DDRB |= (1<<M1_PWM_PIN_1)|(1<<M1_PWM_PIN_2);				//Set OC1A and OC1B as OUTPUT
-	TCCR1A |= (1<<COM1A1)|(1<<COM1B1);	//Set on down, clear on up (OC1A & OC1B)
-	TCCR1B |= (1<<CS10);				//SET PRESCALER to 1
-	TCCR1B |= (1<<WGM13);				//Select PWM Mode (Phase & frequency Correct)
-	ICR1 = 800;							//Set top to 800
-	
-	//		TIMER 3		//
-	
-	DDRE |= (1<<M2_PWM_PIN_1)|(1<<M2_PWM_PIN_2);				//Set OC3A and OC3B as Output
-	TCCR3A |= (1<<COM3A1)|(1<<COM3B1);	//Set on down, clear on up (OC3A & OC3B)
-	TCCR3B |= (1<<CS10);				//Set PRE to 1
-	TCCR3B |= (1<<WGM13);				//Select PWM Mode (Phase and frequency correct) [MODE 8]
-	ICR3 = 800;							//Set top to 800
-	
-	//		TIMER 4		//
-	DDRH |= (1<<SERVO_PWM_PIN);						//Set OC4A as Output
-	TCCR4A |= (1<<COM4A1);				//Set on down, clear on up (OC4A)
-	TCCR4B |= (1<<CS11);				//Set PRE to 8
-	TCCR4B |= (1<<WGM13);				//Select PWM Mode (Phase and frequency correct) [MODE 8]
-	ICR4 = 20000;						//Set top to 20000
+	//Sets timers up
+	initialiseTimers ();
 	
 	//Globally enable interrupts
 	sei ();
 	
-	//Enable coms ISR
 	UCSR2B |= (1 << RXCIE2); // Enable the USART Receive Complete interrupt (USART_RXC)
 	
 	//////////////////////////////////////////////////////////////////////////
@@ -112,77 +100,73 @@ int main(void)
 	
 	while(1)
 	{
-		//		COMS
-		//////////////////////////////////////////////////////////////////////////
+		///			COMS			///
 		
 		//get current time
 		currentTime = milliseconds;
 		
-		//Recieve Message
+		///			RECEIVE MESSAGE			///
 		if (msgRecieveSuccessful)
 		{
 			//incoming msg debug
 			//sprintf (serial_string, "1: %3d || 2: %3d || 3; %3d || 4: %3d\r", recvDataBytes [0], recvDataBytes [1], recvDataBytes [2], recvDataBytes [3]);
 			//serial0_print_string(serial_string);
 			
-			autonomyModeEnabled = recvDataBytes [0] == 1;
 			lastMSGReceiveTime = currentTime;
 			lastReceiveMSGLedFlashTime = currentTime;
 			msgRecieveSuccessful = false;
 			
-			//		OPERATIONS
-			//////////////////////////////////////////////////////////////////////////
-			
-			//Check if has recieved a message recently
-			if (currentTime - lastMSGReceiveTime >= NO_MSG_RECEIVED_SHUTDOWN_TIME_MS)
-			{
-				operating = false;
-				} else {
-				
-				operating = true;
-				}
+			///			OPERATIONS			///
 			
 			if (operating)
 			{
+				//set autonomy mode
+				autonomyModeEnabled = recvDataBytes [0] == 1;
+				
 				//get joystick values between -1 and 1
 				float joyPos [2] = {mapf ((float)recvDataBytes [1], 253.0f, -1.0f, 1.0f), mapf ((float)recvDataBytes [2], 253.0f, -1.0f, 1.0f)};
 				setMotorSpeed (joyPos);
 				
 				//servo
-				OCR4A = mapi (recvDataBytes [3], 253, 1750, 2000);
-				
-				} else {
-				
-				//set to 0,0 to stop motors
-				float joyPos [2] = {0.0, 0.0};
-				setMotorSpeed (joyPos);
-				
-				//servo stop signal
-				OCR4A = 1870;
+				OCR4A = mapi (recvDataBytes [3], 253, SERVO_PWM_MIN_SIGNAL, SERVO_PWM_MAX_SIGNAL);
 			}
 		}
 		
-	
-		
-		//Send Message
-		if (currentTime - lastMSGSendTime >= 100)
+		///			SEND MESSAGE			///
+		if (currentTime - lastMSGSendTime >= MSG_SEND_DELAY_MS)
 		{
 			lastMSGSendTime = currentTime;
 			
 			serial2_write_byte(0xFF);	//Send start byte
 			
 			//send data
-			serial2_write_byte (mapi (avgDistADCValue [0], 1023, 0, 253));
-			serial2_write_byte (mapi (avgDistADCValue [1], 1023, 0, 253));
-			serial2_write_byte (mapi (avgDistADCValue [2], 1023, 0, 253));
+			serial2_write_byte (mapi (avgDistADCValue [0], 1023, 0, 253));	//LR
+			serial2_write_byte (mapi (avgDistADCValue [1], 1023, 0, 253));	//SR_L
+			serial2_write_byte (mapi (avgDistADCValue [2], 1023, 0, 253));	//SR_R
 			
 			serial2_write_byte(0xFE);	//Send stop byte
 		}
 		
+		//Check if has recieved a message recently
+		if (currentTime - lastMSGReceiveTime >= NO_MSG_RECEIVED_SHUTDOWN_TIME_MS)
+		operating = false;
+		else
+		operating = true;
+		
+		if (!operating)
+		{
+			//set to 0,0 to stop motors
+			float joyPos [2] = {0.0, 0.0};
+			setMotorSpeed (joyPos);
+			
+			//servo stop signal
+			OCR4A = SERVO_PWM_STOP_SIGNAL;
+			
+			//autonomy mode disable
+			autonomyModeEnabled = false;
+		}
 		
 		//		DISTANCE SAMPLING		//
-		//////////////////////////////////////////////////////////////////////////
-		
 		if (distADCBufferIndex < (DISTANCE_MEASUREMENT_BUFFER_SIZE - 1))
 		{
 			distADCValueBuffer [distADCBufferIndex][0] = adc_read (PF0);
@@ -221,6 +205,7 @@ int main(void)
 			distADCBufferIndex = 0;
 		}
 		
+		
 		//		Notification LEDS		//
 		setNotificationLEDS (currentTime, lastReceiveMSGLedFlashTime, lastFailedReceiveMSGLedFlashTime, autonomyModeEnabled);
 	}
@@ -231,18 +216,6 @@ int main(void)
 //////////////////////////////////////////////////////////////////////////
 //			METHODS
 //////////////////////////////////////////////////////////////////////////
-
-//		SCLAING FUNCTIONS		//
-
-float mapf (float a, float b, float c, float d)
-{
-	return ((a / b) * (d - c)) + c;
-}
-
-int mapi (int a, int b, int c, int d)
-{
-	return (((double)a/(double)b) * (d-c)) + c;
-}
 
 void setNotificationLEDS (uint32_t currentTime, uint32_t lastSuccessLEDTime, uint32_t lastFailLEDTime, bool autonomyEnabled)
 {
@@ -293,14 +266,47 @@ void setMotorSpeed (float joyPos[])
 	motorMapping[1] = -1.0f;
 	
 	//set compare values for pwm generation
-	//400 = midpoint as OCRnA / OCRnB ranges from 0 - 800
-	OCR1A = 400 + (int)(motorMapping[0] * 400);
-	OCR1B = 400 - (int)(motorMapping[0] * 400);
-	OCR3A = 400 - (int)(motorMapping[1] * 400);
-	OCR3B = 400 + (int)(motorMapping[1] * 400);
+	OCR1A = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) - (int)(motorMapping[0] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
+	OCR1B = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) + (int)(motorMapping[0] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
+	OCR3A = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) + (int)(motorMapping[1] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
+	OCR3B = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) - (int)(motorMapping[1] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
 	
-	sprintf (serial_string, "x: %3d y:%3d || M1: %3d %3d M2: %3d %4d\r", (int)(joyPos [0] * 100), (int)(joyPos [1] * 100), OCR1A, OCR1B, OCR3A, OCR3B);
+	sprintf (serial_string, "x: %3d y:%3d || M1: %3d %3d M2: %3d %3d\r", (int)(joyPos [0] * 100), (int)(joyPos [1] * 100), OCR1A, OCR1B, OCR3A, OCR3B);
 	serial0_print_string (serial_string);
+}
+
+void initialiseTimers ()
+{
+	//		TIMER 1	(M1)	//
+	DDRB |= (1<<M1_PWM_PIN_1)|(1<<M1_PWM_PIN_2);	//Set OC1A and OC1B as OUTPUT
+	TCCR1A |= (1<<COM1A1)|(1<<COM1B1);				//Set on down, clear on up (OC1A & OC1B)
+	TCCR1B |= (1<<CS10);							//SET PRESCALER to 1
+	TCCR1B |= (1<<WGM13);							//Select PWM Mode (Phase & frequency Correct)
+	ICR1 = MOTOR_TIMER_COMPARE_REGISTER_TOP;		//Set compare register top
+	
+	//		TIMER 3	 (M2)	//
+	DDRE |= (1<<M2_PWM_PIN_1)|(1<<M2_PWM_PIN_2);	//Set OC3A and OC3B as Output
+	TCCR3A |= (1<<COM3A1)|(1<<COM3B1);				//Set on down, clear on up (OC3A & OC3B)
+	TCCR3B |= (1<<CS10);							//Set PRESCALER to 1
+	TCCR3B |= (1<<WGM13);							//Select PWM Mode (Phase and frequency correct) [MODE 8]
+	ICR3 = MOTOR_TIMER_COMPARE_REGISTER_TOP;		//Set compare register top
+	
+	//		TIMER 4  (SERVO)	//
+	DDRH |= (1<<SERVO_PWM_PIN);					//Set OC4A as Output
+	TCCR4A |= (1<<COM4A1);						//Set on down, clear on up (OC4A)
+	TCCR4B |= (1<<CS11);						//Set PRE to 8
+	TCCR4B |= (1<<WGM13);						//Select PWM Mode (Phase and frequency correct) [MODE 8]
+	ICR4 = SERVO_TIMER_COMPARE_REGISTER_TOP;	//Set compare register top
+}
+
+float mapf (float a, float b, float c, float d)
+{
+	return ((a / b) * (d - c)) + c;
+}
+
+int mapi (int a, int b, int c, int d)
+{
+	return (((double)a/(double)b) * (d-c)) + c;
 }
 
 ISR (USART2_RX_vect)
