@@ -27,9 +27,9 @@ static const uint16_t SERVO_PWM_MAX_SIGNAL = 2000;
 static const uint16_t SERVO_PWM_STOP_SIGNAL = 1870;
 
 //COMS led pins
-#define COMS_LED_SUCCESS_PIN PA1
+#define COMS_LED_SUCCESS_PIN PA0
 #define COMS_LED_FAILED_PIN PA2
-#define AUTONOMY_MODE_ENABLE_LED_PIN PA0
+#define AUTONOMY_MODE_ENABLE_LED_PIN PA1
 
 //Motor PWM pins
 #define M1_PWM_PIN_1 PB5
