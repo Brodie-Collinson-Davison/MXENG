@@ -1,17 +1,27 @@
+/*
+AUTHORS: Brodie Collinson Davison, Sadman Sakib
+*/
+
+///			INCLUDE STATEMENTS			///
+
 #include "Controller.h"
 
-//global variables
+
 static char serial_string[200] = {0};
 static char lcd_string [50] = {0};
+
+///			CONSTANTS			///
+
 static const uint16_t NO_MSG_RECEIVED_SHUTDOWN_TIME_MS = 500;
 static const uint16_t LED_NOTIFICATION_FLASH_TIME_MS = 5;
+static const uint16_t MSG_SEND_DELAY_MS = 100;
 
-//LED coms pins
-#define COMS_LED_SUCCESS_PIN PA0
-#define COMS_LED_FAILED_PIN PA2
+//LED Coms pins
+#define COMS_LED_SUCCESS_PIN PA2
+#define COMS_LED_FAILED_PIN PA0
 #define AUTONOMY_ENABLED_LED_PIN PA1
 
-//Joystick and autonomy pins
+//Input pins
 #define JOYSTICK_1_X PF0
 #define JOYSTICK_1_Y PF1
 #define JOYSTICK_2_X PF2
@@ -24,11 +34,18 @@ uint8_t recvDataBytes [4] = {0};
 
 uint32_t lastFailedReceiveMSGLedFlashTime = 0;
 
+///			FUNCTION DECLARATIONS			///
+
 int map (int a, int b, int c, int d);
 void setNotificationLEDS(uint32_t currentTime, uint32_t lastSuccessLEDTime, uint32_t lastFailedLEDTime, bool autonomyEnabled);
 
+///				MAIN PROGRAM			///
+
 int main(void)
 {
+	
+	///			DECLARRTOINS			///
+	
 	uint32_t lastReceiveMSGLedFlashTime = 0;
 	
 	uint32_t lastMsgSendTime = 0;
@@ -38,14 +55,14 @@ int main(void)
 	uint16_t joystick1 [2];
 	uint16_t joystick2;
 	
-	//initialisation section, runs once
+	///			INITIALISATION			///
+	
 	serial0_init ();
 	serial2_init ();
 	milliseconds_init ();
 	adc_init ();
 	lcd_init ();
 	_delay_ms (20);
-	
 	
 	//button interrupts
 	DDRD &= ~(1<<AUTONOMY_ENABLED_PIN);		// INT0  is also PD0 and we set the DDR to input
@@ -56,10 +73,15 @@ int main(void)
 	
 	UCSR2B |= (1 << RXCIE2); // Enable the USART Receive Complete interrupt (USART_RXC)
 	
-	//joystick inputs
+	//Joystick pins -> INPUTS
 	DDRF &= ~(1<<JOYSTICK_1_X) | ~(1<<JOYSTICK_1_Y) | ~(1<<JOYSTICK_2_X);
-	//Sets the led output pins
+	//COMS led pins -> OUTPUTS
 	DDRA |= (1<<COMS_LED_SUCCESS_PIN) | (1<<COMS_LED_FAILED_PIN) | (1<<AUTONOMY_ENABLED_LED_PIN);
+	
+	
+	//////////////////////////////////////////////////////////////////////////
+	///			PROGRAM LOOP
+	//////////////////////////////////////////////////////////////////////////
 	
 	while(1)
 	{
@@ -68,15 +90,14 @@ int main(void)
 		joystick1 [0] = adc_read (PF1);
 		joystick2 = adc_read (PF2);
 		
-		//////////////////////////////////////////////////////////////////////////
-		//		COMS
-		//////////////////////////////////////////////////////////////////////////
+		
+		///			COMS			///
 		
 		//get current time
 		currentTime = milliseconds;
 		
 		//SEND MSG
-		if (currentTime - lastMsgSendTime >= 100)
+		if (currentTime - lastMsgSendTime >= MSG_SEND_DELAY_MS)
 		{
 			//prep data within a range of 0 - 253
 			uint8_t databytes [4] = {0};
@@ -122,12 +143,17 @@ int main(void)
 			msgRecievedSuccessful = false;
 		}
 
-		//LED comms
+		//COMS leds
 		setNotificationLEDS(currentTime, lastReceiveMSGLedFlashTime, lastFailedReceiveMSGLedFlashTime, autonomyEnabled);
 	}
 	
 	return(1);
 }
+
+
+//////////////////////////////////////////////////////////////////////////
+///			FUNCTIONS
+//////////////////////////////////////////////////////////////////////////
 
 //convert range of a number from a-b to d-c
 int map(int a, int b, int c, int d)
@@ -166,7 +192,11 @@ void setNotificationLEDS(uint32_t currentTime, uint32_t lastSuccessLEDTime, uint
 	}
 }
 
-//receive message interrupt
+//////////////////////////////////////////////////////////////////////////
+///			INTERRUPTS
+//////////////////////////////////////////////////////////////////////////
+
+//Coms receive byte interrupt
 ISR (USART2_RX_vect)
 {
 	uint8_t inDataByte = UDR2;
