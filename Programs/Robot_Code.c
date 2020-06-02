@@ -53,6 +53,8 @@ int mapi (int a, int b, int c, int d);
 void setMotorSpeed (float joyPos[]);
 void setNotificationLEDS (uint32_t currentTime, uint32_t lastSuccessLEDTime, uint32_t lastFailLEDTime, bool autonomyEnabled);
 void initialiseTimers ();
+uint16_t convertDistanceADCToCM (uint16_t adcDist);
+uint16_t convertLRDistanceADCToCM (uint16_t adcDist);
 
 int main(void)
 {
@@ -67,7 +69,8 @@ int main(void)
 	uint32_t currentTime = 0;
 	
 	//distance sampling
-	uint16_t avgDistADCValue [3] = {0};
+	uint16_t distanceValues [3];
+	uint16_t avgDistADCValue [3];
 	uint16_t distADCValueBuffer [DISTANCE_MEASUREMENT_BUFFER_SIZE][3];
 	uint16_t distADCBufferIndex = 0;
 	
@@ -140,10 +143,11 @@ int main(void)
 			serial2_write_byte(0xFF);	//Send start byte
 			
 			//send data
-			serial2_write_byte (mapi (avgDistADCValue [0], 1023, 0, 253));	//LR
-			serial2_write_byte (mapi (avgDistADCValue [1], 1023, 0, 253));	//SR_L
-			serial2_write_byte (mapi (avgDistADCValue [2], 1023, 0, 253));	//SR_R
-			
+			for (int i = 0; i < 3; i ++)
+			{
+				serial2_write_byte (distanceValues [i]);	
+			}
+						
 			serial2_write_byte(0xFE);	//Send stop byte
 		}
 		
@@ -199,8 +203,12 @@ int main(void)
 				avgDistADCValue [i] = count [i] / DISTANCE_MEASUREMENT_BUFFER_SIZE;
 			}
 			
-			//sprintf (serial_string, "avgs: 1: %4d || 2: %4d || 3: %4d\r", avgDistADCValue [0], avgDistADCValue [1], avgDistADCValue [2]);
-			//serial0_print_string (serial_string);
+			distanceValues [0] = convertDistanceADCToCM (avgDistADCValue [0]);
+			distanceValues [1] = convertDistanceADCToCM (avgDistADCValue [1]);
+			distanceValues [2] = convertLRDistanceADCToCM (avgDistADCValue [2]);
+			
+			sprintf (serial_string, "avgs: 1: %4d || 2: %4d || 3: %4d\r", avgDistADCValue [0], avgDistADCValue [1], avgDistADCValue [2]);
+			serial0_print_string (serial_string);
 			
 			distADCBufferIndex = 0;
 		}
@@ -216,6 +224,16 @@ int main(void)
 //////////////////////////////////////////////////////////////////////////
 //			METHODS
 //////////////////////////////////////////////////////////////////////////
+
+uint16_t convertDistanceADCToCM (uint16_t adcDist)
+{
+	return (uint16_t)((2986.6f / adcDist) - 2.2201f);
+}
+
+uint16_t convertLRDistanceADCToCM (uint16_t adcDist)
+{
+	return (uint16_t)((8337.6f / adcDist) - 12.976f);
+}
 
 void setNotificationLEDS (uint32_t currentTime, uint32_t lastSuccessLEDTime, uint32_t lastFailLEDTime, bool autonomyEnabled)
 {
@@ -271,8 +289,8 @@ void setMotorSpeed (float joyPos[])
 	OCR3A = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) + (int)(motorMapping[1] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
 	OCR3B = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) - (int)(motorMapping[1] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
 	
-	sprintf (serial_string, "x: %3d y:%3d || M1: %3d %3d M2: %3d %3d\r", (int)(joyPos [0] * 100), (int)(joyPos [1] * 100), OCR1A, OCR1B, OCR3A, OCR3B);
-	serial0_print_string (serial_string);
+	//sprintf (serial_string, "x: %3d y:%3d || M1: %3d %3d M2: %3d %3d\r", (int)(joyPos [0] * 100), (int)(joyPos [1] * 100), OCR1A, OCR1B, OCR3A, OCR3B);
+	//serial0_print_string (serial_string);
 }
 
 void initialiseTimers ()
