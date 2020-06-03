@@ -17,7 +17,7 @@ static const uint16_t LED_NOTIFICATION_FLASH_TIME_MS = 5;
 static const uint16_t MSG_SEND_DELAY_MS = 100;
 
 //LED Coms pins
-#define COMS_LED_SUCCESS_PIN PA3
+#define COMS_LED_SUCCESS_PIN PA2
 #define COMS_LED_FAILED_PIN PA0
 #define AUTONOMY_ENABLED_LED_PIN PA1
 
