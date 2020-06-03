@@ -10,7 +10,7 @@ AUTHORS: Brodie Collinson Davison, Sadman Sakib
 
 static char serial_string[200] = {0};
 
-//Distance measurement buffer size declaration
+//Distance measurement buffer size declaration 
 static const uint16_t DISTANCE_MEASUREMENT_BUFFER_SIZE = 200;
 
 //COMS settings
@@ -22,9 +22,25 @@ static const uint16_t MSG_SEND_DELAY_MS = 100;
 static const uint16_t MOTOR_TIMER_COMPARE_REGISTER_TOP = 1300;
 static const uint16_t SERVO_TIMER_COMPARE_REGISTER_TOP = 20000;
 
+//Servo PWM signals
 static const uint16_t SERVO_PWM_MIN_SIGNAL = 1750;
 static const uint16_t SERVO_PWM_MAX_SIGNAL = 2000;
 static const uint16_t SERVO_PWM_STOP_SIGNAL = 1870;
+
+//Autonomy stuff
+enum Directions {forward, back, turnLeft, turnRight};
+
+uint16_t stallDuration = 0;
+uint32_t stallStartTime = 0;
+bool stalling = false;
+
+//turning variables
+static const uint16_t COMPLETE_ROTATION_TIME_MS = 8450;
+uint16_t turnDuration = 0;
+uint32_t turnStartTime = 0;
+bool isTurning = false;
+
+
 
 //COMS led pins
 #define COMS_LED_SUCCESS_PIN PA0
@@ -38,7 +54,16 @@ static const uint16_t SERVO_PWM_STOP_SIGNAL = 1870;
 #define M2_PWM_PIN_2 PE4
 #define SERVO_PWM_PIN PH3
 
+//Distance sensors
+#define FWD_DISTANCE_SENSOR_PIN PF2
+#define LFT_DISTANCE_SENSOR_PIN PF0
+#define RGT_DISTANCE_SENSOR_PIN PF1
 
+#define FWD_DISTANCE_SENSOR_INDEX 2
+#define LFT_DISTANCE_SENSOR_INDEX 0
+#define RGT_DISTANCE_SENSOR_INDEX 1
+
+//COMS variables
 uint8_t recvDataBytes [4] = {0};
 uint8_t fsmComState = 0;
 bool msgRecieveSuccessful = false;
@@ -55,6 +80,9 @@ void setNotificationLEDS (uint32_t currentTime, uint32_t lastSuccessLEDTime, uin
 void initialiseTimers ();
 uint16_t convertDistanceADCToCM (uint16_t adcDist);
 uint16_t convertLRDistanceADCToCM (uint16_t adcDist);
+void setTravelDirection (enum Directions dir, float speed);
+void stopTraveling ();
+void turnSetAngle (float angle);
 
 int main(void)
 {
@@ -69,11 +97,13 @@ int main(void)
 	uint32_t currentTime = 0;
 	
 	//distance sampling
-	uint16_t distanceValues [3];
-	uint16_t avgDistADCValue [3];
-	uint16_t distADCValueBuffer [DISTANCE_MEASUREMENT_BUFFER_SIZE][3];
+	uint16_t distanceValues [3] = {0};
+	uint16_t distSensorAvgADCValues [3] = {0};
+	uint16_t distSensorADCValueBuffer [DISTANCE_MEASUREMENT_BUFFER_SIZE][3];
 	uint16_t distADCBufferIndex = 0;
 	
+	//autonomy
+
 	//////////////////////////////////////////////////////////////////////////
 	//		Initialisation
 	//////////////////////////////////////////////////////////////////////////
@@ -126,12 +156,79 @@ int main(void)
 				//set autonomy mode
 				autonomyModeEnabled = recvDataBytes [0] == 1;
 				
-				//get joystick values between -1 and 1
-				float joyPos [2] = {mapf ((float)recvDataBytes [1], 253.0f, -1.0f, 1.0f), mapf ((float)recvDataBytes [2], 253.0f, -1.0f, 1.0f)};
-				setMotorSpeed (joyPos);
-				
-				//servo
-				OCR4A = mapi (recvDataBytes [3], 253, SERVO_PWM_MIN_SIGNAL, SERVO_PWM_MAX_SIGNAL);
+				if (autonomyModeEnabled)
+				{
+					///			AUTONOMY CONTROLS			///
+					
+					if (stalling)	// Waits for operation to complete
+					{
+						if (isTurning)
+						{
+							if (currentTime - turnStartTime >= turnDuration)
+							{
+								isTurning = false;
+								stopTraveling ();
+							}
+						}
+						
+						//end stalling check
+						if (currentTime - stallStartTime >= stallDuration)
+							stalling = false;
+						
+					} else {
+
+						//go forward naturally
+						if (distanceValues [FWD_DISTANCE_SENSOR_INDEX] <= 15)
+						{
+							stopTraveling ();
+							
+							if (distanceValues [LFT_DISTANCE_SENSOR_INDEX] > distanceValues [RGT_DISTANCE_SENSOR_INDEX])
+							{
+								turnSetAngle (-60);
+							} else if (distanceValues [RGT_DISTANCE_SENSOR_INDEX] > distanceValues [LFT_DISTANCE_SENSOR_INDEX]) {
+								turnSetAngle (60);	
+							} else if (distanceValues [LFT_DISTANCE_SENSOR_INDEX] == distanceValues [RGT_DISTANCE_SENSOR_INDEX])
+							{
+								//sample both 90* left and 90* right distance with long range sensor and figure out which way to go
+								
+								//for now turn right
+								turnSetAngle (90);	
+							}
+								
+						} else if (distanceValues [LFT_DISTANCE_SENSOR_INDEX] >= 5 && distanceValues [RGT_DISTANCE_SENSOR_INDEX] >= 5) {
+							
+							setTravelDirection (forward, 1);	
+						}
+						
+						//turn away from side obstacles
+						if (distanceValues [LFT_DISTANCE_SENSOR_INDEX] < 5)
+						{
+							turnSetAngle (30);
+						} else if (distanceValues [RGT_DISTANCE_SENSOR_INDEX] < 5)
+						{
+							turnSetAngle (-30);
+						}
+						//stop if fwd distance too close
+							//figure out what way to turn
+							//if no way is prefered go right
+						
+					}
+					
+				} else {
+					
+					//disable autonomy variables
+					isTurning = false;
+					stalling = false;
+					
+					///			MAUNAL CONTROLS			///
+					
+					//motors
+					float joyPos [2] = {mapf ((float)recvDataBytes [1], 253.0f, -1.0f, 1.0f), mapf ((float)recvDataBytes [2], 253.0f, 1.0f, -1.0f)};
+					setMotorSpeed (joyPos);
+					
+					//servo
+					OCR4A = mapi (recvDataBytes [3], 253, SERVO_PWM_MIN_SIGNAL, SERVO_PWM_MAX_SIGNAL);
+				}
 			}
 		}
 		
@@ -142,27 +239,25 @@ int main(void)
 			
 			serial2_write_byte(0xFF);	//Send start byte
 			
-			//send data
+			//send distance values
 			for (int i = 0; i < 3; i ++)
 			{
-				serial2_write_byte (distanceValues [i]);	
+				serial2_write_byte (distanceValues [i]);
 			}
-						
+			
 			serial2_write_byte(0xFE);	//Send stop byte
 		}
 		
 		//Check if has recieved a message recently
 		if (currentTime - lastMSGReceiveTime >= NO_MSG_RECEIVED_SHUTDOWN_TIME_MS)
-		operating = false;
+			operating = false;
 		else
-		operating = true;
+			operating = true;
 		
 		if (!operating)
 		{
-			//set to 0,0 to stop motors
-			float joyPos [2] = {0.0, 0.0};
-			setMotorSpeed (joyPos);
-			
+			stopTraveling ();
+				
 			//servo stop signal
 			OCR4A = SERVO_PWM_STOP_SIGNAL;
 			
@@ -171,49 +266,44 @@ int main(void)
 		}
 		
 		//		DISTANCE SAMPLING		//
-		if (distADCBufferIndex < (DISTANCE_MEASUREMENT_BUFFER_SIZE - 1))
+		
+		//fill buffer
+		if (distADCBufferIndex < DISTANCE_MEASUREMENT_BUFFER_SIZE - 1)
 		{
-			distADCValueBuffer [distADCBufferIndex][0] = adc_read (PF0);
-			distADCValueBuffer [distADCBufferIndex][1] = adc_read (PF1);
-			distADCValueBuffer [distADCBufferIndex][2] = adc_read (PF2);
+			distSensorADCValueBuffer [distADCBufferIndex][LFT_DISTANCE_SENSOR_INDEX] = adc_read (LFT_DISTANCE_SENSOR_PIN);
+			distSensorADCValueBuffer [distADCBufferIndex][RGT_DISTANCE_SENSOR_INDEX] = adc_read (RGT_DISTANCE_SENSOR_PIN);
+			distSensorADCValueBuffer [distADCBufferIndex][FWD_DISTANCE_SENSOR_INDEX] = adc_read (FWD_DISTANCE_SENSOR_PIN);
 			
 			distADCBufferIndex ++;
-			
-			//sample debug
-			//sprintf (serial_string, "1: %3d 2: %3d 3: %3d\r", distADCValueBuffer [distADCBufferIndex][0], distADCValueBuffer [distADCBufferIndex][1], distADCValueBuffer [distADCBufferIndex][2]);
-			//serial0_print_string (serial_string);
 		}
 		
-		//calculate average (buffer is full)
+		//buffer full, calculate avg adc values and distances
 		if (distADCBufferIndex == DISTANCE_MEASUREMENT_BUFFER_SIZE - 1)
 		{
-			uint64_t count [3] = {0};
+			//sum buffers
+			uint64_t counter [3] = {0};
 			
-			//sum each distance sensor value
 			for (int i = 0; i < DISTANCE_MEASUREMENT_BUFFER_SIZE; i ++)
 			{
-				count [0] += distADCValueBuffer [i][0];
-				count [1] += distADCValueBuffer [i][1];
-				count [2] += distADCValueBuffer [i][2];
+				counter [0] += distSensorADCValueBuffer [i][LFT_DISTANCE_SENSOR_INDEX];
+				counter [1] += distSensorADCValueBuffer [i][RGT_DISTANCE_SENSOR_INDEX];
+				counter [2] += distSensorADCValueBuffer [i][FWD_DISTANCE_SENSOR_INDEX];
 			}
 			
-			//calculate averages
-			for (int i = 0; i < 3; i ++)
-			{
-				avgDistADCValue [i] = count [i] / DISTANCE_MEASUREMENT_BUFFER_SIZE;
-			}
+			//avg values
+			distSensorAvgADCValues [LFT_DISTANCE_SENSOR_INDEX] = counter [LFT_DISTANCE_SENSOR_INDEX] / DISTANCE_MEASUREMENT_BUFFER_SIZE;
+			distSensorAvgADCValues [RGT_DISTANCE_SENSOR_INDEX] = counter [RGT_DISTANCE_SENSOR_INDEX] / DISTANCE_MEASUREMENT_BUFFER_SIZE;
+			distSensorAvgADCValues [FWD_DISTANCE_SENSOR_INDEX] = counter [FWD_DISTANCE_SENSOR_INDEX] / DISTANCE_MEASUREMENT_BUFFER_SIZE;
 			
-			distanceValues [0] = convertDistanceADCToCM (avgDistADCValue [0]);
-			distanceValues [1] = convertDistanceADCToCM (avgDistADCValue [1]);
-			distanceValues [2] = convertLRDistanceADCToCM (avgDistADCValue [2]);
+			//distance calculations
+			distanceValues [0] = convertDistanceADCToCM (distSensorAvgADCValues [LFT_DISTANCE_SENSOR_INDEX]);
+			distanceValues [1] = convertDistanceADCToCM (distSensorAvgADCValues [RGT_DISTANCE_SENSOR_INDEX]);
+			distanceValues [2] = convertLRDistanceADCToCM (distSensorAvgADCValues [FWD_DISTANCE_SENSOR_INDEX]);
 			
-			sprintf (serial_string, "avgs: 1: %4d || 2: %4d || 3: %4d\r", avgDistADCValue [0], avgDistADCValue [1], avgDistADCValue [2]);
-			serial0_print_string (serial_string);
-			
+			//reset buffer index
 			distADCBufferIndex = 0;
 		}
-		
-		
+			
 		//		Notification LEDS		//
 		setNotificationLEDS (currentTime, lastReceiveMSGLedFlashTime, lastFailedReceiveMSGLedFlashTime, autonomyModeEnabled);
 	}
@@ -227,12 +317,126 @@ int main(void)
 
 uint16_t convertDistanceADCToCM (uint16_t adcDist)
 {
-	return (uint16_t)((2986.6f / adcDist) - 2.2201f);
+	uint16_t dist = (uint16_t)((2986.6f / adcDist) - 2.2201f);
+	
+	if (dist > 30)
+		dist = 30;
+	if (dist < 3)
+		dist = 3;
+		
+	return dist;
 }
 
 uint16_t convertLRDistanceADCToCM (uint16_t adcDist)
 {
-	return (uint16_t)((8337.6f / adcDist) - 12.976f);
+	uint16_t dist = (uint16_t)((8337.6f / adcDist) - 12.976f);
+	
+	if (dist > 80)
+		dist = 80;
+	if (dist < 10)
+		dist = 10;
+	
+	return dist;
+}
+
+//positive angles are right turns
+//negative angles are left turns
+void turnSetAngle (float angle)
+{
+	if (angle > 0) {
+		// turn right
+		setTravelDirection (turnRight, 1);
+	} else {
+		// turn left
+		setTravelDirection (turnLeft, 1);
+	}
+	
+	float revolutionPercent = abs (angle) / 360.0f;
+	turnDuration = revolutionPercent * COMPLETE_ROTATION_TIME_MS;
+	turnStartTime = milliseconds;
+	isTurning = true;
+	
+	//stall the autnomy mode while turning
+	stallDuration = turnDuration + 25;
+	stallStartTime = turnStartTime;
+	stalling = true;
+}
+
+//Motors need 70% throttle to start moving and thus the input speed needs to be remapped
+void setTravelDirection (enum Directions dir, float speed)
+{
+	float mappedSpeed = mapf (speed, 1.0f, 0.65f, 1.0f);
+	
+	//ensures the motors are at full idle if no speed is applied
+	if (speed == 0)
+		mappedSpeed = 0;
+		
+	if (dir == forward)
+	{
+		float motorSpeed [2] = {-1.0f * mappedSpeed, 0};
+		setMotorSpeed (motorSpeed);
+	}
+	
+	if (dir == back)
+	{
+		float motorSpeed [2] = {mappedSpeed, 0};
+		setMotorSpeed (motorSpeed);
+	}
+	
+	if (dir == turnLeft)
+	{
+		float motorSpeed [2] = {0, mappedSpeed};
+		setMotorSpeed (motorSpeed);
+	}
+	
+	if (dir == turnRight)
+	{
+		float motorSpeed [2] = {0, -1.0f * mappedSpeed};
+		setMotorSpeed (motorSpeed);
+	}
+}
+
+void stopTraveling ()
+{
+	float motorSpeed [2] = {0, 0};
+	setMotorSpeed (motorSpeed);
+}
+
+void setMotorSpeed (float joyPos[])
+{
+	/*
+		JOY POS TO MOTOR DIR
+		
+		FWD = -1, 0
+		BCK = 1, 0
+		LFT = 0, 1
+		RGT = 0, -1	
+	
+	*/
+	float motorMapping [2] =
+	{
+		joyPos[0] + joyPos[1],
+		joyPos[1] - joyPos[0]
+	};
+	
+	//normalization
+	if (motorMapping[0] > 1.0f)
+	motorMapping[0] = 1.0f;
+	if (motorMapping[0] < -1.0f)
+	motorMapping[0] = -1.0f;
+	if (motorMapping[1] > 1.0f)
+	motorMapping[1] = 1.0f;
+	if (motorMapping[1] < -1.0f)
+	motorMapping[1] = -1.0f;
+	
+	//set compare values for pwm generation
+	OCR1A = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) - (int)(motorMapping[0] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
+	OCR1B = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) + (int)(motorMapping[0] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
+	OCR3A = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) + (int)(motorMapping[1] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
+	OCR3B = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) - (int)(motorMapping[1] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
+	
+	//sprintf (serial_string, "x: %3d y:%3d || M1: %3d %3d M2: %3d %3d\r", (int)(joyPos [0] * 100), (int)(joyPos [1] * 100), OCR1A, OCR1B, OCR3A, OCR3B);
+	//serial0_print_string (serial_string);
 }
 
 void setNotificationLEDS (uint32_t currentTime, uint32_t lastSuccessLEDTime, uint32_t lastFailLEDTime, bool autonomyEnabled)
@@ -260,37 +464,6 @@ void setNotificationLEDS (uint32_t currentTime, uint32_t lastSuccessLEDTime, uin
 		
 		PORTA &= ~(1<<AUTONOMY_MODE_ENABLE_LED_PIN);
 	}
-}
-
-void setMotorSpeed (float joyPos[])
-{
-	//motor direction mapping
-	//fwd =  1, 1	//bck = -1, -1
-	//lft = -1, 1	//rght = 1, -1
-	float motorMapping [2] =
-	{
-		joyPos[0] + joyPos[1],
-		joyPos[1] - joyPos[0]
-	};
-	
-	//normalization
-	if (motorMapping[0] > 1.0f)
-	motorMapping[0] = 1.0f;
-	if (motorMapping[0] < -1.0f)
-	motorMapping[0] = -1.0f;
-	if (motorMapping[1] > 1.0f)
-	motorMapping[1] = 1.0f;
-	if (motorMapping[1] < -1.0f)
-	motorMapping[1] = -1.0f;
-	
-	//set compare values for pwm generation
-	OCR1A = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) - (int)(motorMapping[0] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
-	OCR1B = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) + (int)(motorMapping[0] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
-	OCR3A = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) + (int)(motorMapping[1] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
-	OCR3B = (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2) - (int)(motorMapping[1] * (MOTOR_TIMER_COMPARE_REGISTER_TOP / 2));
-	
-	//sprintf (serial_string, "x: %3d y:%3d || M1: %3d %3d M2: %3d %3d\r", (int)(joyPos [0] * 100), (int)(joyPos [1] * 100), OCR1A, OCR1B, OCR3A, OCR3B);
-	//serial0_print_string (serial_string);
 }
 
 void initialiseTimers ()
